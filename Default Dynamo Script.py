@@ -26,18 +26,46 @@ dataEnteringNode = IN
 
 adoc = Application.DocumentManager.MdiActiveDocument
 editor = adoc.Editor
+civilDoc = CivilApplication.ActiveDocument
+
+output = []
 
 with adoc.LockDocument():
-    with adoc.Database as db:
+    db = adoc.Database
+    tm = db.TransactionManager
+    with tm.StartTransaction() as t:
+        try:
+            # Iterate through all Parts Lists in the current drawing
+            for partsListId in civilDoc.Styles.PartLists:
+                partsList = t.GetObject(partsListId, OpenMode.ForRead)
+                list_name = partsList.Name
+                pipe_families = []
 
-        with db.TransactionManager.StartTransaction() as t:
-            # Place your code below
-            # 
-            #
+                # Get each pipe family within the Parts List
+                for familyId in partsList.GetPartFamilies(PartType.Pipe):
+                    family = t.GetObject(familyId, OpenMode.ForRead)
+                    fam_name = family.Name
+                    sizes = []
 
-            # Commit before end transaction
-            #t.Commit()
-            pass
+                    # Get all part sizes in this family
+                    for partSize in family.PartSizes:
+                        sizes.append(partSize.Name)
+
+                    pipe_families.append({
+                        "Family": fam_name,
+                        "Sizes": sizes
+                    })
+
+                output.append({
+                    "PartsList": list_name,
+                    "PipeFamilies": pipe_families
+                })
+
+        except Exception as e:
+            output = str(e)
+
+        # Commit before end transaction (read-only, but good practice)
+        t.Commit()
 
 # Assign your output to the OUT variable.
-OUT = 0
+OUT = output
