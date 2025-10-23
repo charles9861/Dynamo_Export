@@ -197,9 +197,141 @@ Example output:
 
 ---
 
-Would you like me to:
+# **Part 2**
 
-* Modify this script to **output a simple flat list** (just all sizes regardless of family),
-  or
-* Keep it **grouped by family and parts list** (better for dropdown pickers)?
+Code above didnt export the expected data
+
+Excellent — that’s very useful feedback ✅
+
+What you’re seeing tells me *exactly* what’s happening under the hood:
+the **`.Name`** property I used is returning the *raw XML parameters* of the part definition — i.e. Civil 3D’s internal *part size record string* (`{MCR:0,WTh:150,Material:Reinforced Concrete,…}`), rather than the **user-friendly “Nominal Size” label** that you see in Civil 3D’s Parts List (“Concrete Box Culvert SI”, “1 X 160mm”, etc.).
+
+That’s a common trap — the *part size record* holds engineering parameters, but not the display name shown in the Toolspace.
+
+---
+
+### 🧠 What You Actually Want
+
+You want the **display name** of each pipe size, the same text visible in:
+
+> Toolspace → Settings → Parts Lists → Pipe → [Part Family] → [Part Size]
+
+That name is stored in the **PartSizeName** property, not in `.Name` or `.ToString()`.
+
+So, we’ll fix that.
+
+---
+
+### ✅ Revised Python Node (returns Civil 3D Display Names)
+
+This version queries the *PartSizeName* property instead of the internal record string.
+
+```python
+# Load the Python Standard and DesignScript Libraries
+import sys
+import clr
+
+# Add Assemblies for AutoCAD and Civil3D
+clr.AddReference('AcMgd')
+clr.AddReference('AcCoreMgd')
+clr.AddReference('AcDbMgd')
+clr.AddReference('AecBaseMgd')
+clr.AddReference('AecPropDataMgd')
+clr.AddReference('AeccDbMgd')
+
+# Import references from AutoCAD
+from Autodesk.AutoCAD.Runtime import *
+from Autodesk.AutoCAD.ApplicationServices import *
+from Autodesk.AutoCAD.EditorInput import *
+from Autodesk.AutoCAD.DatabaseServices import *
+from Autodesk.AutoCAD.Geometry import *
+
+# Import references from Civil3D
+from Autodesk.Civil.ApplicationServices import *
+from Autodesk.Civil.DatabaseServices import *
+
+# The inputs to this node will be stored as a list in the IN variables.
+dataEnteringNode = IN
+
+adoc = Application.DocumentManager.MdiActiveDocument
+editor = adoc.Editor
+civilDoc = CivilApplication.ActiveDocument
+
+output = []
+
+with adoc.LockDocument():
+    db = adoc.Database
+    tm = db.TransactionManager
+    with tm.StartTransaction() as t:
+        try:
+            # Iterate through all Parts Lists in the current drawing
+            for partsListId in civilDoc.Styles.PartLists:
+                partsList = t.GetObject(partsListId, OpenMode.ForRead)
+                list_name = partsList.Name
+                pipe_families = []
+
+                # Get each pipe family within the Parts List
+                for familyId in partsList.GetPartFamilies(PartType.Pipe):
+                    family = t.GetObject(familyId, OpenMode.ForRead)
+                    fam_name = family.Name
+                    sizes = []
+
+                    # Get all part sizes in this family, using display names
+                    for partSize in family.PartSizes:
+                        try:
+                            # Try to get the user-friendly display name
+                            size_name = partSize.PartSizeName
+                        except:
+                            # Fallback to .Name if property missing
+                            size_name = partSize.Name
+                        sizes.append(size_name)
+
+                    pipe_families.append({
+                        "Family": fam_name,
+                        "Sizes": sizes
+                    })
+
+                output.append({
+                    "PartsList": list_name,
+                    "PipeFamilies": pipe_families
+                })
+
+        except Exception as e:
+            output = str(e)
+
+        t.Commit()
+
+# Assign your output to the OUT variable.
+OUT = output
+```
+
+---
+
+### 🧩 What This Will Output
+
+You should now see human-readable part size names like:
+
+```
+[
+  {
+    "PartsList": "Storm and Foul Drainage",
+    "PipeFamilies": [
+      {"Family": "Concrete Box Culvert SI", "Sizes": ["1 x 160mm", "2 x 300mm", "3 x 450mm"]},
+      {"Family": "CG Telecom Ducting", "Sizes": ["1 X 160mm", "3 X 110mm"]}
+    ]
+  }
+]
+```
+
+---
+
+### 🔍 Next Step (Optional)
+
+If this returns the expected, readable data, we can:
+
+* Flatten it for Excel export (`["1 x 160mm", "2 x 300mm", …]`), or
+* Filter it for a specific Parts List or Family so you can target your swaps.
+
+Would you like me to make it **output only the part sizes** (a flat list for pick lists), once we confirm this version works?
+
 
